@@ -4,13 +4,14 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch as th
-
+import torch
 from stable_baselines3.common.buffers import DictReplayBuffer
 from stable_baselines3.common.preprocessing import get_obs_shape
 from stable_baselines3.common.type_aliases import DictReplayBufferSamples
 from stable_baselines3.common.vec_env import VecEnv, VecNormalize
 from stable_baselines3.her.goal_selection_strategy import KEY_TO_GOAL_STRATEGY, GoalSelectionStrategy
-
+from sklearn.neighbors import KernelDensity
+import matplotlib.pyplot as plt
 
 def get_time_limit(env: VecEnv, current_max_episode_length: Optional[int]) -> int:
     """
@@ -82,7 +83,8 @@ class HerReplayBuffer(DictReplayBuffer):
         handle_timeout_termination: bool = True,
     ):
         super().__init__(buffer_size, env.observation_space, env.action_space, device, env.num_envs)
-
+        self.counter = 0
+        self.ft = None
         # convert goal_selection_strategy into GoalSelectionStrategy if string
         if isinstance(goal_selection_strategy, str):
             self.goal_selection_strategy = KEY_TO_GOAL_STRATEGY[goal_selection_strategy.lower()]
@@ -257,6 +259,118 @@ class HerReplayBuffer(DictReplayBuffer):
         elif self.goal_selection_strategy == GoalSelectionStrategy.EPISODE:
             # replay with random state which comes from the same episode as current transition
             transitions_indices = np.random.randint(self.episode_lengths[her_episode_indices])
+        
+        elif self.goal_selection_strategy == GoalSelectionStrategy.UNIFORM:
+            # transitions_indices = self.episode_lengths[her_episode_indices] - 1
+            # replay with final state of current episode
+            # print('uniform here!!')
+            # self._buffer['observation'][her_episode_indices] # This is observations you sellected.
+
+
+            BatchObs = self._buffer['observation'][her_episode_indices]
+            origin_shape = BatchObs.shape
+            BatchObs = BatchObs.reshape(-1, BatchObs.shape[-1])
+            
+            from KDEpy import FFTKDE
+            norm = 2
+            class fit_transform():
+                def __init__(self, grid, points) -> None:
+                    
+                    self.grid, self.points = grid, points
+                    if torch.cuda.is_available():
+                        self.grid, self.points = torch.from_numpy(grid).cuda(), torch.from_numpy(points).cuda()
+                    #torch.from_numpy(a)
+
+                    
+                def transform(self,  BatchObs, origin_shape):
+                    # px = np.zeros(BatchObs.shape[0])
+                    # for i in range(BatchObs.shape[0]):
+                    #     idx = np.linalg.norm(BatchObs[i] - self.grid, axis= 1).argmin()
+                    #     px[i] = self.points[idx]
+                    if torch.cuda.is_available():
+                        BatchObs = torch.from_numpy(BatchObs).cuda()
+                        if len(self.grid.shape) == 1:
+                            self.grid = torch.unsqueeze(self.grid, dim = -1)
+                        idxs = torch.norm((torch.unsqueeze(BatchObs, dim=1) - self.grid), dim = -1).argmin(dim =1)
+                    else:
+                        idxs = np.linalg.norm((np.expand_dims(BatchObs, axis=1) - self.grid), axis = -1).argmin(axis =1)
+                    px = self.points[idxs]
+                    px = px.reshape(origin_shape[:-2])
+                    transitions_indices = px.argsort()[:,0]
+                    transitions_indices = transitions_indices.detach().cpu().numpy()
+                    original_px = self.points[idxs].detach().cpu().numpy()
+                    # breakpoint()
+                    return transitions_indices, original_px, px
+            num_grid = 10000
+            kde = FFTKDE(kernel='gaussian', bw = 0.2, norm=norm)
+            if self.counter % 100 == 0:
+                grid, points = kde.fit(BatchObs[:,:1]).evaluate(num_grid)
+                # print('BatchObs', BatchObs.shape)
+                self.ft = fit_transform(grid, points)
+            if self.ft == None:
+                grid, points = kde.fit(BatchObs[:,:1]).evaluate(num_grid)
+                self.ft = fit_transform(grid, points)
+            grid, points = kde.fit(BatchObs[:,:1]).evaluate(num_grid)
+            # breakpoint()
+            self.ft = fit_transform(grid, points)
+            transitions_indices, origin_px , px= self.ft.transform( BatchObs[:,:1], origin_shape)
+            # origin_px = px
+            # px = px.reshape(origin_shape[:-2])
+            # transitions_indices = px.argsort()[:,0]
+            self.counter += 1
+            # print('self.counter', self.counter)
+
+            # kde = KernelDensity(kernel='linear', bandwidth=0.01).fit(BatchObs)
+            # log_density = kde.score_samples(BatchObs)
+            # plt.scatter(BatchObs[:, 0], log_density)
+            # plt.savefig('./TestImages/P_of_Obs.jpg')
+            
+
+
+
+            if self.counter % 100== 0:
+            # breakpoint()
+                
+                BatchObs_episode = BatchObs[:,0].reshape(transitions_indices.shape[0], -1)
+                choosed_pos = []
+                for i in range(transitions_indices.shape[0]):
+                    choosed_pos.append(BatchObs_episode[i][transitions_indices[i]])
+                # print('BatchObs[:,0]', np.max(BatchObs[:,0]))
+                # print('BatchObs[transitions_indices,0]', BatchObs[transitions_indices,0])
+                # print('np.min(BatchObs, axis=1)', np.min(BatchObs_episode, axis=1))
+                # print('np.max(BatchObs, axis=1)', np.max(BatchObs_episode, axis=1))
+                plt.scatter(BatchObs[:,0], origin_px)
+                plt.hist(choosed_pos, density=False, bins= 100) # Incorrect!
+                plt.plot(grid, points)
+                plt.savefig('./TestImages/P_of_Obs.jpg')
+                plt.close()
+            # breakpoint()
+            # grid_points = 2**7
+            # N = 16
+            # grid, points = kde.fit(BatchObs).evaluate(grid_points)
+
+            # fig = plt.figure(figsize=(2,2))
+            # ax = fig.add_subplot(111)
+            # ax.set_title(f'Norm $p={norm}$')
+            # x, y = np.unique(grid[:, 0]), np.unique(grid[:, 1])
+            # z = points.reshape(grid_points, grid_points).T
+
+            # # Plot the kernel density estimate
+            # ax.contour(x, y, z, N, linewidths=0.8, colors='k')
+            # ax.contourf(x, y, z, N, cmap="RdBu_r")
+            # ax.plot(BatchObs[:, 0], BatchObs[:, 1], 'ok', ms=3)
+            # plt.tight_layout()
+            # # plt.scatter(grid, points)
+            # plt.savefig('./TestImages/P_of_Obs.jpg')
+            # plt.close()
+            # breakpoint()
+            
+            
+
+
+            
+
+            
 
         else:
             raise ValueError(f"Strategy {self.goal_selection_strategy} for sampling goals not supported!")
@@ -278,6 +392,24 @@ class HerReplayBuffer(DictReplayBuffer):
         :param n_sampled_goal: Number of sampled goals for replay. (offline sampling)
         :return: Samples.
         """
+
+
+        '''
+        self._buffer.keys() # dict_keys(['observation', 'achieved_goal', 'desired_goal', 'action', 'reward', 'next_obs', 'next_achieved_goal', 'next_desired_goal', 'done'])
+        
+        '''
+        # print(self._buffer['observation'].shape)
+        # print('np.where(self._buffer[observation]!=0)' ,np.where(self._buffer['observation']!=0))
+        # print('np.where(self._buffer[observation]==0)' ,np.where(self._buffer['observation']==0))
+        # print('########')
+
+        '''
+        Here we compute the kernel density of the observation
+        '''
+        
+        
+
+        # breakpoint()
         # Select which episodes to use
         if online_sampling:
             assert batch_size is not None, "No batch_size specified for online sampling of HER transitions"
@@ -302,7 +434,8 @@ class HerReplayBuffer(DictReplayBuffer):
             her_indices = np.arange(len(episode_indices))
 
         ep_lengths = self.episode_lengths[episode_indices]
-
+        # print('self.n_episodes_stored', self.n_episodes_stored)
+        # breakpoint()
         if online_sampling:
             # Select which transitions to use
             transitions_indices = np.random.randint(ep_lengths)

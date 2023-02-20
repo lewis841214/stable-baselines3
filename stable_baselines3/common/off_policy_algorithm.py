@@ -20,7 +20,7 @@ from stable_baselines3.common.type_aliases import GymEnv, MaybeCallback, Rollout
 from stable_baselines3.common.utils import safe_mean, should_collect_more_steps
 from stable_baselines3.common.vec_env import VecEnv
 from stable_baselines3.her.her_replay_buffer import HerReplayBuffer
-
+import matplotlib.pyplot as plt
 SelfOffPolicyAlgorithm = TypeVar("SelfOffPolicyAlgorithm", bound="OffPolicyAlgorithm")
 
 
@@ -429,6 +429,30 @@ class OffPolicyAlgorithm(BaseAlgorithm):
             self.logger.record("rollout/success_rate", safe_mean(self.ep_success_buffer))
         # Pass the number of timesteps for tensorboard
         self.logger.dump(step=self.num_timesteps)
+
+        # print(self.replay_buffer._buffer['desired_goal'].reshape(-1,2)[:,0])
+        # print(self.replay_buffer._buffer['observation'].reshape(-1,2)[:,0])
+
+        # ag = self.replay_buffer._buffer['achieved_goal'].reshape(-1,2)[:,0]
+        # ag = ag[np.where(ag != 0)]
+        # ag = ag[np.where(ag != 0.6)]
+
+        # # dg = self.replay_buffer._buffer['desired_goal'].reshape(-1,2)[:,0]
+        # # dg = dg[np.where(dg != 0)]
+        # # dg = dg[np.where(dg != 0.6)]
+        # dg = self.replay_buffer._buffer['observation'][:,-1,0,0]
+        # dg = dg[np.where(dg != 0)]
+
+        # obss = self.replay_buffer._buffer['observation'].reshape(-1,2)[:,0]
+        # obss = obss[np.where(obss != 0)]
+        
+        # # plt.hist(ag, bins= 1000, density = True, label = 'achieved_goal')
+        # plt.hist(dg, bins= 100, density = True, label = 'drsired_goal')
+        # plt.hist(obss, bins= 100,density = True,  label = 'observation')
+        # plt.legend()
+        # plt.savefig('./TestImages/dishist.jpg')
+        # plt.close()
+        # breakpoint()
 
     def _on_step(self) -> None:
         """

@@ -16,6 +16,9 @@ class GoalSelectionStrategy(Enum):
     # Select a goal that was achieved in the episode
     EPISODE = 2
 
+    # Sample rare observation first
+    UNIFORM = 3
+
 
 # For convenience
 # that way, we can use string to select a strategy
@@ -23,4 +26,5 @@ KEY_TO_GOAL_STRATEGY = {
     "future": GoalSelectionStrategy.FUTURE,
     "final": GoalSelectionStrategy.FINAL,
     "episode": GoalSelectionStrategy.EPISODE,
+    "uniform": GoalSelectionStrategy.UNIFORM
 }
