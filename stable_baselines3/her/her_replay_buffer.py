@@ -328,7 +328,7 @@ class HerReplayBuffer(DictReplayBuffer):
 
 
 
-            if self.counter % 100== 0:
+            if self.counter % 2000== 1:
             # breakpoint()
                 
                 BatchObs_episode = BatchObs[:,0].reshape(transitions_indices.shape[0], -1)
@@ -342,7 +342,7 @@ class HerReplayBuffer(DictReplayBuffer):
                 plt.scatter(BatchObs[:,0], origin_px)
                 plt.hist(choosed_pos, density=False, bins= 100) # Incorrect!
                 plt.plot(grid, points)
-                plt.savefig('./TestImages/P_of_Obs.jpg')
+                plt.savefig(f'./TestImages/P_of_Obs-{self.counter}.jpg')
                 plt.close()
             # breakpoint()
             # grid_points = 2**7
